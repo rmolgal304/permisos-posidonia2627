@@ -472,10 +472,10 @@
   <script>
     // =========================================================
     //  ⚠️  PASO FINAL: pega aquí la URL de tu Web App
-    //  Después de publicar el script, copia la URL /exec
-    //  y sustitúye el texto /api
+    //  Después de implementar el script, copia la URL que
+    //  termina en /exec y sustituye PEGA_AQUI_LA_URL_EXEC
     // =========================================================
-    const APPS_SCRIPT_URL = '/api';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzxJXvzHGJzSTv91ZmEDb_ZLLZ9qibrgy7biP6WLnMYtsp0yhrp3cNiWrp48d5gVaBEig/exec';
 
     // =========================================================
     //  Contraseña de administrador
@@ -501,6 +501,7 @@
     let requests   = {};
     let currentIdx = 0;
     let dataLoaded = false;
+    let loadFailed = false;   // si la carga falla, se bloquea guardar para no borrar datos
 
     // ── Carga JSONP (sin bloqueo CORS) ──────────────────────
     // Carga datos via fetch normal (el proxy de Netlify añade CORS)
@@ -508,22 +509,25 @@
       try {
         const res  = await fetch(APPS_SCRIPT_URL + '?action=load');
         const json = await res.json();
-        if (json.ok && Object.keys(json.data).length > 0) {
-          requests = json.data;
-        }
+        if (!json.ok) throw new Error(json.error || 'Respuesta no válida');
+        requests = json.data || {};
       } catch (e) {
         console.warn('Error cargando hoja:', e);
+        loadFailed = true;
       }
     }
 
-    // Guarda datos via fetch normal a través del proxy
+    // Devuelve true solo si el script confirma que ha guardado
     async function saveToSheet() {
       try {
         const url = APPS_SCRIPT_URL + '?action=save&payload=' +
                     encodeURIComponent(JSON.stringify(requests));
-        await fetch(url);
+        const res  = await fetch(url);
+        const json = await res.json();
+        return json.ok === true;
       } catch (e) {
         console.warn('Error al guardar:', e);
+        return false;
       }
     }
 
@@ -637,11 +641,25 @@
         return;
       }
 
+      if (loadFailed) {
+        msg.textContent = 'No se pudieron cargar los datos de la hoja. Recarga la página antes de guardar.';
+        msg.className   = 'msg err';
+        return;
+      }
+
       requests[k]     = next;
       msg.textContent = 'Guardando…';
       msg.className   = 'msg info';
 
-      await saveToSheet();
+      const ok = await saveToSheet();
+      if (!ok) {
+        requests[k]     = cur;   // deshace el cambio local
+        msg.textContent = 'No se pudo guardar en la hoja. Inténtalo de nuevo.';
+        msg.className   = 'msg err';
+        render();
+        renderLog();
+        return;
+      }
 
       msg.textContent = '✓ Guardado. Ahora: ' + badgeText(next) + '.';
       msg.className   = 'msg ok';
@@ -728,6 +746,7 @@
     loadFromSheet().then(function() {
       dataLoaded = true;
       document.getElementById('cal-loading').style.display = 'none';
+      if (loadFailed) alert('No se pudieron cargar los datos de la hoja. Comprueba la URL del script.');
       render();
     });
   </script>
